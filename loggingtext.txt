@@ -1,0 +1,404 @@
+package com.insurance.insuranceCompany.controller;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.servlet.http.HttpServletResponse;
+
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.insurance.insuranceCompany.contract.InsurancePackageRepository;
+import com.insurance.insuranceCompany.model.Categories;
+import com.insurance.insuranceCompany.model.DiseaseDetails;
+import com.insurance.insuranceCompany.model.InsurancePackage;
+
+@Controller
+public class InsurancePackageController {
+
+	private final InsurancePackageRepository insurancePackageRepository;
+
+	private static final Logger logger = LoggerFactory.getLogger(InsurancePackageController.class);
+
+	@Autowired
+	public InsurancePackageController(InsurancePackageRepository insurancePackageRepository) {
+		this.insurancePackageRepository = insurancePackageRepository;
+	}
+
+	@GetMapping("/list")
+	public String getAllInsurancePackages(Model model) {
+		try {
+			logger.trace("Entering getAllInsurancePackages method");
+
+			List<InsurancePackage> insurancePackages = insurancePackageRepository.getAllInsurancePackages();
+			model.addAttribute("insurancePackages", insurancePackages);
+			logger.info("Retrieved {} insurance packages.", insurancePackages.size());
+
+		} catch (Exception e) {
+			logger.error("An error occurred while retrieving insurance packages.", e);
+		} finally {
+			logger.trace("Exiting getAllInsurancePackages method");
+		}
+		return "packages";
+	}
+
+	@GetMapping("/diseasedetails/{discId}")
+	public String viewDiseseDetails(@PathVariable int discId, Model model) {
+		try {
+			logger.trace("Entering viewDiseseDetails method");
+
+			DiseaseDetails dd = insurancePackageRepository.getDiseaseDetailsById(discId);
+			model.addAttribute("diseasedetails", dd);
+
+			logger.info("Retrieved disease details for disease ID: {}", discId);
+		} catch (Exception e) {
+			logger.error("An error occurred while retrieving disease details for ID: {}", discId, e);
+		} finally {
+			logger.trace("Exiting viewDiseseDetails method");
+		}
+
+		return "diseasedetails";
+	}
+
+	@RequestMapping(value = "/start")
+	public String packages() {
+		return "redirect:/list";
+	}
+
+	@GetMapping("/filteredpackages")
+	public String getFilteredPackages(@RequestParam("status") String status, @RequestParam("age") String age,
+			Model model) {
+
+		if ("ALL".equals(status) && age.equals("")) {
+			List<InsurancePackage> insurancePackages = insurancePackageRepository.getAllInsurancePackages();
+			model.addAttribute("insurancePackages", insurancePackages);
+		} else if ("ALL".equals(status) && !age.equals("")) {
+			List<InsurancePackage> insurancePackages = insurancePackageRepository
+					.getAllInsurancePackagesByAge(Integer.parseInt(age));
+			model.addAttribute("insurancePackages", insurancePackages);
+		} else {
+			if (age.equals("")) {
+				List<InsurancePackage> insurancePackages = insurancePackageRepository.getPackagesByStatus(status);
+				model.addAttribute("insurancePackages", insurancePackages);
+			} else {
+				List<InsurancePackage> packages = insurancePackageRepository.getFilteredPackages(status,
+						Integer.parseInt(age));
+				model.addAttribute("insurancePackages", packages);
+			}
+		}
+
+		return "packages";
+	}
+
+	@RequestMapping(value = "/excel")
+	public void downloadExcel(@RequestParam("status") String status, @RequestParam("age") String age,
+			HttpServletResponse response) throws IOException {
+		try {
+			logger.trace("Entering downloadExcel method");
+
+			List<InsurancePackage> insurancePackages = new ArrayList<>();
+
+			if ("ALL".equals(status) && age.equals("")) {
+				insurancePackages = insurancePackageRepository.getAllInsurancePackages();
+			} else if ("ALL".equals(status) && !age.equals("")) {
+				insurancePackages = insurancePackageRepository.getAllInsurancePackagesByAge(Integer.parseInt(age));
+			} else {
+				if (age.equals("")) {
+					insurancePackages = insurancePackageRepository.getPackagesByStatus(status);
+				} else {
+					insurancePackages = insurancePackageRepository.getFilteredPackages(status, Integer.parseInt(age));
+				}
+			}
+
+			Workbook workbook = new XSSFWorkbook();
+			org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("Packages List");
+			Row headerRow = sheet.createRow(0);
+
+			// Define column headings
+			headerRow.createCell(0).setCellValue("PackageId");
+			headerRow.createCell(1).setCellValue("PackageTitle");
+			headerRow.createCell(2).setCellValue("Description");
+			headerRow.createCell(3).setCellValue("Status");
+			headerRow.createCell(4).setCellValue("Amount Start Range");
+			headerRow.createCell(5).setCellValue("Amount End Range");
+			headerRow.createCell(6).setCellValue("Age Limit Start");
+			headerRow.createCell(7).setCellValue("Age Limit End");
+
+			int rowIdx = 1;
+			for (InsurancePackage insurance : insurancePackages) {
+				Row row = sheet.createRow(rowIdx++);
+				row.createCell(0).setCellValue(insurance.getInspId());
+				row.createCell(1).setCellValue(insurance.getInspTitle());
+				row.createCell(2).setCellValue(insurance.getInspDescription());
+				row.createCell(3).setCellValue(insurance.getInspStatus());
+				row.createCell(4).setCellValue(insurance.getInspRangeStart());
+				row.createCell(5).setCellValue(insurance.getInspRangeEnd());
+				row.createCell(6).setCellValue(insurance.getInspAgeLimitStart());
+				row.createCell(7).setCellValue(insurance.getInspAgeLimitEnd());
+			}
+
+			response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+			response.setHeader("Content-Disposition", "attachment; filename=packages.xlsx");
+			OutputStream outputStream = response.getOutputStream();
+			workbook.write(outputStream);
+			outputStream.close();
+
+			logger.info("Excel file downloaded successfully");
+		} catch (Exception e) {
+			logger.error("An error occurred while downloading the Excel file", e);
+		} finally {
+			logger.trace("Exiting downloadExcel method");
+		}
+	}
+
+	@GetMapping(value = "/diseases/{inspId}/{inspTitle}")
+	public String getDiseases(@PathVariable int inspId, @PathVariable String inspTitle, Model model) {
+		try {
+			logger.trace("Entering getDiseases method");
+
+			List<DiseaseDetails> diseases = insurancePackageRepository.getDiseasesByPackageId(inspId);
+
+			model.addAttribute("inspId", inspId);
+			model.addAttribute("inspTitle", inspTitle);
+			model.addAttribute("diseases", diseases);
+
+			logger.info("Retrieved diseases for inspId: {}", inspId);
+
+			return "diseasedetails";
+		} catch (Exception e) {
+			logger.error("An error occurred while retrieving diseases for inspId: {}", inspId, e);
+			return "error"; // Handle the error gracefully by returning an error view
+		} finally {
+			logger.trace("Exiting getDiseases method");
+		}
+	}
+
+	@PostMapping("/addDiseaseBh")
+	@ResponseBody
+	public String addDisease(@RequestParam String name, String ICDCode, String Description, String inspId) {
+		try {
+			logger.trace("Entering addDisease method");
+
+			int message = insurancePackageRepository.addDisease(name, ICDCode, Description, "Ac",
+					Integer.parseInt(inspId));
+
+			if (message == 1) {
+				logger.info("Record added successfully");
+				return "record added successfully";
+			} else {
+				logger.error("Error occurred while adding record");
+				return "error occurred while adding record";
+			}
+		} catch (Exception e) {
+			logger.error("An error occurred while adding a disease record", e);
+			return "error occurred while adding record"; // You can customize the error message
+		} finally {
+			logger.trace("Exiting addDisease method");
+		}
+	}
+
+	@PostMapping("/deleteDiseaseBh")
+	@ResponseBody
+	public String deleteDisease(@RequestParam int did, int inspId) {
+		try {
+			logger.trace("Entering deleteDisease method");
+
+			int message = insurancePackageRepository.deleteDisease(did, inspId);
+
+			if (message == 1) {
+				logger.info("Record deleted successfully");
+				return "record deleted successfully";
+			} else {
+				logger.error("Error occurred while deleting record");
+				return "error occurred while deleting record";
+			}
+		} catch (Exception e) {
+			logger.error("An error occurred while deleting a disease record", e);
+			return "error occurred while deleting record"; // You can customize the error message
+		} finally {
+			logger.trace("Exiting deleteDisease method");
+		}
+	}
+
+	@PostMapping("/editDiseaseBh")
+	@ResponseBody
+	public String editDisease(@RequestParam String name, String ICDCode, String Description, String Status, String Id,
+			Model model) {
+		try {
+			logger.trace("Entering editDisease method");
+
+			String message = insurancePackageRepository.editDisease(name, ICDCode, Description, Status, Id);
+
+			logger.info("Edit disease operation result: {}", message);
+			return message;
+		} catch (Exception e) {
+			logger.error("An error occurred while editing a disease record", e);
+			return "An error occurred while editing the disease record"; // You can customize the error message
+		} finally {
+			logger.trace("Exiting editDisease method");
+		}
+	}
+
+	@GetMapping(value = "/categories/{inspId}/{inspTitle}")
+	public String getCategories(@PathVariable int inspId, @PathVariable String inspTitle, Model model) {
+		try {
+			logger.trace("Entering getCategories method");
+
+			List<Categories> diseases = insurancePackageRepository.getCategoriesByPackageId(inspId);
+
+			model.addAttribute("inspId", inspId);
+			model.addAttribute("inspTitle", inspTitle);
+			model.addAttribute("categories", diseases);
+
+			logger.info("Retrieved categories for inspId: {}", inspId);
+
+			return "Categories";
+		} catch (Exception e) {
+			logger.error("An error occurred while retrieving categories for inspId: {}", inspId, e);
+			return "error"; // Handle the error gracefully by returning an error view
+		} finally {
+			logger.trace("Exiting getCategories method");
+		}
+	}
+
+	@PostMapping("/deleteCategory")
+	@ResponseBody
+	public String deleteCategory(@RequestParam String cid, String inspId) {
+		try {
+			logger.trace("Entering deleteCategory method");
+
+			int message = insurancePackageRepository.deleteCategory(Integer.parseInt(cid), Integer.parseInt(inspId));
+
+			if (message == 1) {
+				logger.info("Record deleted successfully");
+				return "record deleted successfully";
+			} else {
+				logger.error("Error occurred while deleting record");
+				return "error occurred while deleting record";
+			}
+		} catch (Exception e) {
+			logger.error("An error occurred while deleting a category record", e);
+			return "error occurred while deleting record"; // You can customize the error message
+		} finally {
+			logger.trace("Exiting deleteCategory method");
+		}
+	}
+
+	@PostMapping("/addCategory")
+	@ResponseBody
+	public String addCategory(@RequestParam String Title, String Description, String inspId) {
+		try {
+			logger.trace("Entering addCategory method");
+
+			int message = insurancePackageRepository.addCategory("", Title, Description, "Ac",
+					Integer.parseInt(inspId));
+
+			if (message == 1) {
+				logger.info("Record added successfully");
+				return "record added successfully";
+			} else {
+				logger.error("Error occurred while adding record");
+				return "error occurred while adding record";
+			}
+		} catch (Exception e) {
+			logger.error("An error occurred while adding a category record", e);
+			return "error occurred while adding record"; // You can customize the error message
+		} finally {
+			logger.trace("Exiting addCategory method");
+		}
+	}
+
+	@PostMapping("/editCategory")
+	@ResponseBody
+	public String editCategory(@RequestParam String Title, String Description, String Status, String inspId,
+			Model model) {
+		try {
+			logger.trace("Entering editCategory method");
+			String message = insurancePackageRepository.editCategory(Title, Description, Status);
+			logger.info("Edit category operation result: {}", message);
+			return message;
+		} catch (Exception e) {
+			logger.error("An error occurred while editing a category record", e);
+			return "An error occurred while editing the category record"; // You can customize the error message
+		} finally {
+			logger.trace("Exiting editCategory method");
+		}
+	}
+
+	@PostMapping("/deletePackagesBh")
+	@ResponseBody
+	public String deletePackages(@ModelAttribute("did") String insp) {
+		try {
+			logger.trace("Entering deletePackages method");
+
+			int message = insurancePackageRepository.deletePackage(Integer.parseInt(insp));
+
+			if (message == 1) {
+				logger.info("Record deleted successfully");
+				return "record deleted successfully";
+			} else {
+				logger.error("Error occurred while deleting record");
+				return "error occurred while deleting record";
+			}
+		} catch (Exception e) {
+			logger.error("An error occurred while deleting a package record", e);
+			return "error occurred while deleting record"; // You can customize the error message
+		} finally {
+			logger.trace("Exiting deletePackages method");
+		}
+	}
+
+	@PostMapping("/editPackageBh")
+	@ResponseBody
+	public String editPackage(@RequestParam String Id, String title, String Description, String status,
+			String rangeStart, String rangeEnd, String ageLimitStrt, String ageLimitEnd, Model model) {
+		try {
+			logger.trace("Entering editPackage method");
+			String message = insurancePackageRepository.editPackage(Id, title, Description, status, rangeStart,
+					rangeEnd, ageLimitStrt, ageLimitEnd);
+			logger.info("Edit package operation result: {}", message);
+
+			return message;
+		} catch (Exception e) {
+			logger.error("An error occurred while editing a package record", e);
+			return "An error occurred while editing the package record"; // You can customize the error message
+		} finally {
+			logger.trace("Exiting editPackage method");
+		}
+	}
+
+	@PostMapping("/addPackageBh")
+	@ResponseBody
+	public String addPackage(@RequestBody InsurancePackage insurancePackage, Model model) {
+		try {
+			logger.trace("Entering addPackage method");
+			insurancePackageRepository.addPackage(insurancePackage);
+			List<InsurancePackage> insurancePackages = insurancePackageRepository.getAllInsurancePackages();
+			model.addAttribute("insurancePackages", insurancePackages);
+			logger.info("Package added successfully");
+			return "packages";
+		} catch (Exception e) {
+			logger.error("An error occurred while adding a package", e);
+			return "An error occurred while adding the package"; // You can customize the error message
+		} finally {
+			logger.trace("Exiting addPackage method");
+		}
+	}
+
+}
